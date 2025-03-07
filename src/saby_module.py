@@ -297,18 +297,3 @@ class SABYManager:
             error = json.loads(resp_text).get("error", json.loads(resp_text))
             logging.critical(f"Ошибка: {error}")
             return error
-
-
-if __name__ == "__main__":
-
-    manager = SABYManager(login="ХарьковскийАМ",
-                          password="Retread-Undusted9-Catalyst-Unseated")
-    params = {
-    "Фильтр": {
-        "ДатаС": "01.01.2024",
-        "ДатаПо": "01.01.2025",
-        "Тип": "ДокОтгрИсх",
-        }
-    }
-
-    print(manager.send_query("СБИС.СписокНашихОрганизаций", {"Фильтр": {}}))
