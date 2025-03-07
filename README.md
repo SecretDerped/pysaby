@@ -12,14 +12,14 @@ from pysaby import SABYManager
 
 manager = SABYManager(login="YourLogin", password="Y0urP4$$word")
 ```
-Потом найдите название метода и словарь параметров к нему тут: [Список методов и параметров к ним: https://saby.ru/help/integration/api/all_methods](https://saby.ru/help/integration/api/all_methods).
+Потом найдите название метода и словарь параметров к нему тут: [https://saby.ru/help/integration/api/all_methods](https://saby.ru/help/integration/api/all_methods).
 
 После через метод send_query передайте строку с названием метода и словарь параметров:
 ```python
 result = manager.send_query("СБИС.СписокНашихОрганизаций", {"Фильтр": {}})
 ```
 Менеджер сам выполнит авторизацию и сделает запрос.
-Если на аккаунте настроен вход с подтверждением по номеру, то программа приостановится и попросит код:
+Если на аккаунте настроен вход с подтверждением по номеру, то программа приостановится и попросит код в консоли:
 ```
 На номер (номер, привязанный к аккаунту) отправлен код подтверждения входа.
 Нажмите Ctrl+D, чтобы выйти из программы.
@@ -33,13 +33,16 @@ result = manager.send_query("СБИС.СписокНашихОрганизаци
 
 ## Установка
 
-Модуль можно установить с помощью `pip install pysaby`.
+Модуль можно установить с помощью pip:
+```
+python3 -m pip install pysaby
+```
 
 ## Дополнительно
 
-Код полностью открыт, вы можете посмотреть его и использовать как угодно.
+Код полностью открыт, [можете смотреть](https://github.com/SecretDerped/pysaby) и использовать его как угодно.
 
-## Пример использования
+## Примеры использования
 
 ```python
 import os
@@ -73,6 +76,7 @@ print(result)
 # 'Контрагент': {'Email': 'kowalski@analysis.com' ...
 # ...}],
 # 'Навигация': {'ЕстьЕще': 'Да', 'РазмерСтраницы': '50', 'Страница': '4'}}
+
 document = result['Документ'][0]
 print(document['Идентификатор'])
 #> 02f7db13-b092-4a76-b1f7-08f6e9fffcfd
@@ -107,5 +111,5 @@ manager.send_query("СБИС.ЗаписатьДокумент", params)
 
 ## Связь с автором
 
-Telegram: https://t.me/ce_135
+Telegram: [https://t.me/ce_135](https://t.me/ce_135),
 E-mail: followluna@yandex.ru
