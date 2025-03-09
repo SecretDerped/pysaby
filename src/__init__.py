@@ -1,1 +1,1 @@
-from .saby_module import SABYManager
+from .pysaby import SABYManager

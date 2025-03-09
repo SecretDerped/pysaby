@@ -3,7 +3,7 @@ import os
 import gc
 import json
 from unittest.mock import patch, MagicMock
-from pysaby.saby_module import SABYManager, MAX_JSON_SIZE
+from src.pysaby import SABYManager, MAX_JSON_SIZE
 
 class TestSABYManager(unittest.TestCase):
     @classmethod
@@ -53,7 +53,7 @@ class TestSABYManager(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager._send_json_request("http://fakeurl", payload, self.manager.headers)
 
-    @patch('scr.saby_module.SABYManager._send_json_request')
+    @patch('src.pysaby.SABYManager._send_json_request')
     def test_send_query_success(self, mock_send_json_request):
         # Эмулируем успешный ответ сервера
         token = "test_token"
