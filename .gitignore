@@ -1,3 +1,5 @@
 dist/
 __pycache__/
 .vscode/
+tests/__pycache__/tests.cpython-312.pyc
+tests/__pycache__/tests.cpython-312.pyc

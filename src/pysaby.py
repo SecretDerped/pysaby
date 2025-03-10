@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 import urllib.request
@@ -36,18 +37,19 @@ class SABYManager:
         }
 
         self.db_table_name: str = 'auth_state'
-        self.db_file: str = 'saby_manager.db'
+        # База будет храниться в папке с библиотекой
+        self.db_file: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'saby_manager.db')
         self._init_db()
     
-    def __str__(self):
-        text = f'SABY manager login: {self.login}'
-        if ["X-SBISSessionID"]:
-            text += f', authorised already'
+    def __str__(self) -> str:
+        if self.headers.get("X-SBISSessionID"):
+            status = 'Авторизован.'
         else:
-            text += f', need to authorise'
+            status = 'Нет доступа. Нужна авторизация.'
+        return f'SABY manager login: {self.login}, {status}'
 
-    def __repr__(self):
-        return f'SABYManager(login={self.login}, password=..., charset={self.charset}, headers={self.headers})'
+    def __repr__(self) -> str:
+         return f'SABYManager(login={self.login}, password=***, charset={self.charset}, headers={self.headers})'
 
     def _init_db(self) -> None:
         """
@@ -60,16 +62,21 @@ class SABYManager:
 
         :raises sqlite3.Error: В случае ошибок работы с базой данных.
         """
-        with sqlite3.connect(self.db_file) as conn:
-            with conn:
-                cursor =  conn.cursor()
+        try:
+            with sqlite3.connect(self.db_file) as conn:
+                cursor = conn.cursor()
                 cursor.execute(
-                    f'CREATE TABLE IF NOT EXISTS {self.db_table_name} ('
-                    'id INTEGER PRIMARY KEY, '
-                    'login TEXT NOT NULL, '
-                    'token TEXT)'
+                    f'''CREATE TABLE IF NOT EXISTS {self.db_table_name} (
+                        id INTEGER PRIMARY KEY,
+                        login TEXT NOT NULL,
+                        token TEXT
+                    )'''
                 )
+                conn.commit()
                 cursor.close()
+        except sqlite3.Error as e:
+            logging.error(f"Не удалось создать базу: {e}")
+            raise
 
     def _save_auth_state(self, token: str) -> None:
         """
@@ -80,12 +87,17 @@ class SABYManager:
         :type token: str
         :raises sqlite3.Error: В случае ошибок работы с базой данных.
         """
-        with sqlite3.connect(self.db_file) as conn:
-            with conn:
+        try:
+            with sqlite3.connect(self.db_file) as conn:
                 cursor = conn.cursor()
-                cursor.execute(f"DELETE FROM {self.db_table_name} WHERE login='{self.login}'")
-                cursor.execute(f"INSERT INTO {self.db_table_name} (login, token) VALUES ('{self.login}', '{token}')")
+                # Поля с данными пользователя выводим отдельно во избежание SQL-иньекций
+                cursor.execute(f"DELETE FROM {self.db_table_name} WHERE login = ?", (self.login,))
+                cursor.execute(f"INSERT INTO {self.db_table_name} (login, token) VALUES (?, ?)", (self.login, token))
+                conn.commit()
                 cursor.close()
+        except sqlite3.Error as e:
+            logging.error(f"Ошибка при сохранении токена авторизации в базу данных: {e}")
+            raise
 
     def _load_auth_state(self) -> Optional[str]:
         """
@@ -94,14 +106,16 @@ class SABYManager:
         :return: Токен, если найден, иначе None.
         :rtype: Optional[str]
         """
-        with sqlite3.connect(self.db_file) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"SELECT token FROM {self.db_table_name} WHERE login = '{self.login}' LIMIT 1"
-            )
-            row = cursor.fetchone()
-            cursor.close()
-        return row[0] if row else None
+        try:
+            with sqlite3.connect(self.db_file) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"SELECT token FROM {self.db_table_name} WHERE login = ? LIMIT 1", (self.login,))
+                row = cursor.fetchone()
+                cursor.close()
+                return row[0] if row else None
+        except sqlite3.Error as e:
+            logging.error(f"Ошибка при загрузке токена авторизации из базы данных: {e}")
+            return None
 
     def _send_json_request(self,
                            url: str,
@@ -156,14 +170,19 @@ class SABYManager:
 
         url = f"{self.base_url}/auth/service/"
         status_code, resp_text = self._send_json_request(url, payload, self.headers)
-        logging.debug(f"{self.auth_method_name}: {json.loads(resp_text)=}")
+        logging.debug(f"{self.auth_method_name}: {resp_text=}")
 
         try:
-            token = json.loads(resp_text)["result"]
+            response_data = json.loads(resp_text)
+            token = response_data["result"]
             self._save_auth_state(token)
             return token
         except KeyError:
+            # Если в ответе нет ключа "result", то ловим
             return self._handle_auth_error(resp_text, url)
+        except json.JSONDecodeError as e:
+            logging.error(f"Ошибка декодирования JSON ответа: {e}")
+            raise
 
     def _handle_auth_error(self, resp_text: str, url: str) -> Optional[str]:
         """
@@ -176,16 +195,22 @@ class SABYManager:
         :return: Токен, если аутентификация завершилась успешно, иначе None.
         :rtype: Optional[str]
         """
-        error_msg = json.loads(resp_text).get("error", "Unknown error")
-        logging.warning(f"Authorization error: {error_msg}")
+        try:
+            response_data = json.loads(resp_text)
+        except json.JSONDecodeError as e:
+            logging.error(f"Ошибка декодирования JSON ответа ошибки при авторизации: {e}")
+            raise
 
-        error_data = error_msg.get("data", {})
-        error_id = error_data.get("classid")
-
-        # Проверка, требует ли ошибка аутентификацию через SMS
-        if error_id == "{00000000-0000-0000-0000-1fa000001002}":
-            return self._handle_sms_authentication(error_data, url)
-
+        error = response_data.get("error", {})
+        if isinstance(error, dict):
+            error_data = error.get("data", {})
+            error_id = error_data.get("classid")
+            logging.warning(f"Authorization error: {error}")
+            # Проверяем, нужна ли авторизация по номеру
+            if error_id == "{00000000-0000-0000-0000-1fa000001002}":
+                return self._handle_sms_authentication(error_data, url)
+        else:
+            logging.warning(f"Неизвестная ошибка: {error}")
         return None
 
     def _handle_sms_authentication(self, error_data: Dict[str, Any], url: str) -> Optional[str]:
@@ -204,31 +229,45 @@ class SABYManager:
             logging.error("Данные для процедуры авторизации по SMS отсутствуют.")
             return None
 
-        self.headers["X-SBISSessionID"] = session_info["ИдентификаторСессии"]
+        session_id = session_info.get("ИдентификаторСессии")
+        if not session_id:
+            logging.error("Идентификатор сессии не был получен.")
+            return None
+
+        self.headers["X-SBISSessionID"] = session_id
 
         # Отправка кода аутентификации
         payload = {
             "jsonrpc": "2.0",
             "method": "СБИС.ОтправитьКодАутентификации",
-            "params": {"Идентификатор": session_info["Идентификатор"]},
+            "params": {"Идентификатор": session_info.get("Идентификатор")},
             "id": 0
         }
         self._send_json_request(url, payload, self.headers)
 
-        while True: # Пока пользователь не введёт правильный код, программа будет посылать запросы на SMS
-            auth_code = input(
-                "На номер " + str(session_info['Телефон']) + " отправлен код подтверждения входа.\n"
-                "Нажмите Ctrl+D, чтобы выйти из программы.\n\nВведите код сюда и нажмите Enter: "
-            )
+        while True:   # Пока пользователь не введёт правильный код, программа будет посылать запросы на SMS
+            try:
+                auth_code = input(
+                    "На номер " + str(session_info.get('Телефон')) + " отправлен код подтверждения входа.\n"
+                    "Нажмите Ctrl+D, чтобы выйти из программы.\n\nВведите код сюда и нажмите Enter: "
+                )
+            except EOFError:
+                logging.info("Пользователь вышел из программы.")
+                return None
+
             # Подтверждение входа
             payload = {
                 "jsonrpc": "2.0",
                 "method": "СБИС.ПодтвердитьВход",
-                "params": {"Идентификатор": session_info["Идентификатор"], "Код": auth_code},
+                "params": {"Идентификатор": session_info.get("Идентификатор"), "Код": auth_code},
                 "id": 0
             }
             status_code, resp_text = self._send_json_request(url, payload, self.headers)
-            response = json.loads(resp_text)
+            try:
+                response_data = json.loads(resp_text)
+            except json.JSONDecodeError as e:
+                logging.error(f"Ошибка декодирования JSON в процессе авторизации по номеру: {e}")
+                continue
 
             if token := response.get("result"):
                 self._save_auth_state(token)
@@ -243,9 +282,10 @@ class SABYManager:
         :return: Токен авторизации.
         :rtype: Optional[str]
         """
-        return self._load_auth_state() or self._auth()
+        token = self._load_auth_state()
+        return token if token else self._auth()
 
-    def send_query(self, method, params):
+    def send_query(self, method: str, params: Dict[str, Any]) -> Any:
         """
         Выполняет основной запрос к SABY API.
 
@@ -274,26 +314,39 @@ class SABYManager:
         url = f"{self.base_url}/service/"
         status_code, resp_text = self._send_json_request(url, payload, self.headers)
         logging.info(f"Метод: {method}. Код ответа: {status_code}")
-        logging.debug(f"URL: {url}\nЗаголовок: {self.headers}\nПараметры: {params}\nОтвет: {json.loads(resp_text)}\n")
+        logging.debug(f"URL: {url}\nЗаголовок: {self.headers}\nПараметры: {params}\nОтвет: {resp_text}\n")
 
         try:
-            match status_code:
-                case 200:
-                    return json.loads(resp_text)["result"]
-                case 401:
-                    logging.info("Попытка обновить токен...")
-                    self.headers["X-SBISSessionID"] = self._auth() or ""
+            response_data = json.loads(resp_text)
+        except json.JSONDecodeError as e:
+            logging.error(f"Ошибка декодирования JSON ответа на запрос {method}: {e}")
+            return None
+
+        match status_code:
+            case 200:
+                return response_data.get("result")
+            case 401:
+                logging.info("Попытка обновить токен...")
+                new_token = self._auth()
+                if new_token:
+                    self.headers["X-SBISSessionID"] = new_token
                     status_code, resp_text = self._send_json_request(url, payload, self.headers)
-                    return json.loads(resp_text)["result"]
-                case 404:
-                    raise AttributeError(f"Ошибка в названии метода '{method}', либо к методу подобраны"
-                                         f"неверные параметры. Данные об ошибке: {json.loads(resp_text)['error']}")
-                case 500:
-                    raise AttributeError(f"{method}: {json.loads(resp_text)['error']}")
-                case _:
-                    logging.error(f"Код ошибки {status_code}: {resp_text}")
-                    return None
-        except KeyError:
-            error = json.loads(resp_text).get("error", json.loads(resp_text))
-            logging.critical(f"Ошибка: {error}")
-            return error
+                    try:
+                        response_data = json.loads(resp_text)
+                    except json.JSONDecodeError as e:
+                        logging.error(f"Ошибка декодирования JSON после обновления токена для метода {method}: {e}")
+                        return None
+                    return response_data.get("result")
+                else:
+                    raise Exception("Не удалось получить токен.")
+            case 404:
+                error_detail = response_data.get("error")
+                raise AttributeError(
+                    f"Метод '{method}' не найден, либо параметры не подходят. Данные об ошибке: {error_detail}"
+                )
+            case 500:
+                error_detail = response_data.get("error")
+                raise AttributeError(f"Ошибка сервера при запросе {method}: {error_detail}")
+            case _:
+                logging.error(f"Неожиданный код ошибки - {status_code}: {resp_text}")
+                return None
