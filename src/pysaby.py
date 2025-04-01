@@ -296,12 +296,12 @@ class SABYManager:
                 if status_code == 200:
                     return json.loads(resp_text).get("result")
                 else:
-                    raise 
+                    raise AttributeError(f"{method}: {resp_text}")
             case 404:
                 raise AttributeError(f"Ошибка в названии метода '{method}', либо к методу подобраны"
-                                        f"неверные параметры. Данные об ошибке: {resp_json['error']}")
+                                        f"неверные параметры. Данные об ошибке: {resp_json.get('error')}")
             case 500:
-                raise AttributeError(f"{method}: {resp_json['error']}")
+                raise AttributeError(f"{method}: {resp_json.get('error')}")
             case _:
                 logging.error(f"Код ошибки {status_code}: {resp_text}")
                 return None
