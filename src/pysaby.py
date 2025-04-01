@@ -156,27 +156,28 @@ class SABYManager:
 
         url = f"{self.base_url}/auth/service/"
         status_code, resp_text = self._send_json_request(url, payload, self.headers)
-        logging.debug(f"{self.auth_method_name}: {json.loads(resp_text)=}")
+        resp_json = json.loads(resp_text)
+        logging.debug(f"{self.auth_method_name}: {resp_json}")
 
-        try:
-            token = json.loads(resp_text)["result"]
+        token = resp_json.get("result")
+        if token:
             self._save_auth_state(token)
             return token
-        except KeyError:
-            return self._handle_auth_error(resp_text, url)
+        else:
+            return self._handle_auth_error(resp_json, url)
 
-    def _handle_auth_error(self, resp_text: str, url: str) -> Optional[str]:
+    def _handle_auth_error(self, resp_json: str, url: str) -> Optional[str]:
         """
         Обрабатывает ошибки аутентификации, включая проверку необходимости SMS подтверждения.
 
-        :param resp_text: Текст ответа сервера.
-        :type resp_text: str
+        :param resp_json: Текст ответа сервера.
+        :type resp_json: str
         :param url: URL запроса аутентификации.
         :type url: str
         :return: Токен, если аутентификация завершилась успешно, иначе None.
         :rtype: Optional[str]
         """
-        error_msg = json.loads(resp_text).get("error", "Unknown error")
+        error_msg = resp_json.get("error", "Unknown error")
         logging.warning(f"Authorization error: {error_msg}")
 
         error_data = error_msg.get("data", {})
@@ -230,10 +231,13 @@ class SABYManager:
             status_code, resp_text = self._send_json_request(url, payload, self.headers)
             response = json.loads(resp_text)
 
-            if token := response.get("result"):
+            token = response.get("result")
+            if token:
                 self._save_auth_state(token)
                 return token
-            if error_msg := response.get("error"):
+            
+            else:
+                error_msg = response.get("error", response)
                 logging.warning(f"Авторизация не удалась: {error_msg}. Новая попытка...")
 
     def _get_sid(self) -> Optional[str]:
@@ -274,26 +278,32 @@ class SABYManager:
         url = f"{self.base_url}/service/"
         status_code, resp_text = self._send_json_request(url, payload, self.headers)
         logging.info(f"Метод: {method}. Код ответа: {status_code}")
-        logging.debug(f"URL: {url}\nЗаголовок: {self.headers}\nПараметры: {params}\nОтвет: {json.loads(resp_text)}\n")
+        resp_json = json.loads(resp_text)
+        logging.debug(f"URL: {url}\nЗаголовок: {self.headers}\nПараметры: {params}\nОтвет: {resp_json}\n")
 
-        try:
-            match status_code:
-                case 200:
-                    return json.loads(resp_text)["result"]
-                case 401:
-                    logging.info("Попытка обновить токен...")
-                    self.headers["X-SBISSessionID"] = self._auth() or ""
-                    status_code, resp_text = self._send_json_request(url, payload, self.headers)
-                    return json.loads(resp_text)["result"]
-                case 404:
-                    raise AttributeError(f"Ошибка в названии метода '{method}', либо к методу подобраны"
-                                         f"неверные параметры. Данные об ошибке: {json.loads(resp_text)['error']}")
-                case 500:
-                    raise AttributeError(f"{method}: {json.loads(resp_text)['error']}")
-                case _:
-                    logging.error(f"Код ошибки {status_code}: {resp_text}")
-                    return None
-        except KeyError:
-            error = json.loads(resp_text).get("error", json.loads(resp_text))
-            logging.critical(f"Ошибка: {error}")
-            return error
+        error_text = resp_json.get("error")
+        if error_text:
+            logging.critical(f"Ошибка: {error_text}")
+            return error_text
+
+        match status_code:
+            case 200:
+                return resp_json.get("result")
+            case 401:
+                logging.info("Попытка обновить токен...")
+                self.headers["X-SBISSessionID"] = self._auth() or ""
+                status_code, resp_text = self._send_json_request(url, payload, self.headers)
+                if status_code == 200:
+                    return json.loads(resp_text).get("result")
+                else:
+                    raise 
+            case 404:
+                raise AttributeError(f"Ошибка в названии метода '{method}', либо к методу подобраны"
+                                        f"неверные параметры. Данные об ошибке: {resp_json['error']}")
+            case 500:
+                raise AttributeError(f"{method}: {resp_json['error']}")
+            case _:
+                logging.error(f"Код ошибки {status_code}: {resp_text}")
+                return None
+
+        return resp_json
