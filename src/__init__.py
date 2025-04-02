@@ -1,1 +1,3 @@
-from .pysaby import SABYManager
+from pysaby import SABYManager
+
+__all__ = ['SABYManager']

@@ -28,7 +28,6 @@ result = manager.send_query("СБИС.СписокНашихОрганизаци
 > 1234
 ```
 
-Поддерживает вывод логов через logging.
 Не использует сторонние зависимости.
 
 ## Установка
@@ -48,8 +47,8 @@ python3 -m pip install pysaby
 import os
 from pysaby import SABYManager
 
-login = os.getenv("LOGIN")
-password = os.getenv("PASSWORD")
+login = os.environ.get("LOGIN")
+password = os.environ.get("PASSWORD")
 
 manager = SABYManager(login, password)
 
